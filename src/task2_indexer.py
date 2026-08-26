@@ -135,23 +135,9 @@ _KERNEL_MM_SRC_EMBED = r'''// ASCENDC_CUBE_ONLY 必须定义在 include 之前�
 using namespace AscendC;
 using namespace matmul;
 
-// 任务类型：三个 mm kernel 只做 Cube 工作，声明成 MIX 会让运行时按
-// cube+vector 协同去建跨核同步，AIC 可能永远等不到 -> aicore timeout(507014)。
-// 用 -DKS_MM_TASK_TYPE=n 切换；n 进编译缓存键，改了必重建。
-//   0 = 不声明（编译器自动，等同官方直调样例）
-//   1 = MIX_AIC_1_1   2 = MIX_AIC_1_2   3 = AIC_ONLY
-#ifndef KS_MM_TASK_TYPE
-#define KS_MM_TASK_TYPE 3
-#endif
-#if   KS_MM_TASK_TYPE == 1
-#define KS_TASK() KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_1)
-#elif KS_MM_TASK_TYPE == 2
-#define KS_TASK() KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)
-#elif KS_MM_TASK_TYPE == 3
+// 独立的 mm kernel 只做 Cube 工作。如果不声明或声明成 MIX，运行时会按 cube+vector
+// 协同去建跨核同步，AIC 端可能永远等不到对端（aicore timeout 507014），所以显式 AIC_ONLY。
 #define KS_TASK() KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY)
-#else
-#define KS_TASK()
-#endif
 
 __aicore__ inline void CopyTiling(TCubeTiling* t, GM_ADDR gm) {
     uint32_t* p = reinterpret_cast<uint32_t*>(t);
@@ -175,7 +161,7 @@ extern "C" __global__ __aicore__ void ix_mm(GM_ADDR a, GM_ADDR b, GM_ADDR c, GM_
            MatmulType<TPosition::GM, CubeFormat::ND, float>> mm;
     REGIST_MATMUL_OBJ(&pipe, ws, mm, &tiling);   // CUBE_ONLY 下 ws 参数被忽略；KFC 模式下即邮箱区
     // 按 CANN 自带算子写法：REGIST 之后不再手工做 AIC/AIV 分流（AIC 已在宏内 return），
-    // 也不声明 KERNEL_TASK_TYPE（默认 KS_MM_TASK_TYPE=0），由编译器自行判定核配比。
+    // AIC 已经在宏内 return 了。
     if ((int32_t)GetBlockIdx() >= tiling.usedCoreNum) return;
     int32_t mBlocks = (tiling.M + tiling.singleCoreM - 1) / tiling.singleCoreM;
     int32_t mIdx = GetBlockIdx() % mBlocks, nIdx = GetBlockIdx() / mBlocks;
@@ -950,9 +936,7 @@ def _build_ext(name, kernel_srcs, host_src, need_tiling_libs=True):
     ascend = _find_ascend_home()
     # 缓存键必须包含**构建配方版本**：只哈希源码会导致改了链接参数/包含路径后
     # 仍然复用旧的坏 .so（实测踩过：修了 ascendc_runtime 链接但 .so 没重建）。
-    _tt = os.environ.get("KS_MM_TASK_TYPE", "3")   # E40-42: AIC_ONLY 全绿且 T1 mm1 快3倍/AIV 释放
-    _co = os.environ.get("KS_CUBE_ONLY", "0")
-    _RECIPE = "r11-userws-tt" + _tt + "-co" + _co
+    _RECIPE = "indexer-r1"
     blob = _RECIPE + host_src + "".join(s for _, s in kernel_srcs) + torch.__version__
     tag = hashlib.md5(blob.encode()).hexdigest()[:12]
     cache = os.path.join(os.path.expanduser("~/.cache/ks_kernels"), f"{name}_{tag}")
@@ -982,7 +966,7 @@ def _build_ext(name, kernel_srcs, host_src, need_tiling_libs=True):
             # -> aicore timeout(507014)；在 workspace 指针还是空的时候则表现为 MTE 异常(507015)。
             # 定义该宏后 Matmul 退化为 MatmulImpl，直接在 Cube 上执行，无需 KFC。
             _run_cc([bisheng, "-c", "-O2", f"--npu-arch={arch}", "-xasc", "-std=c++17",
-                            f"-DKS_MM_TASK_TYPE={_tt}"] + (["-DASCENDC_CUBE_ONLY"] if _co == "1" else []) + [
+                            ] + [
                             "-fPIC", kcpp, "-o", ko] + [f"-I{i}" for i in inc], f"bisheng:{fname}")
             kobjs.append(ko)
         hcpp = os.path.join(cache, "host.cpp")

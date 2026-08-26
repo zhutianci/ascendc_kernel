@@ -196,11 +196,11 @@ __aicore__ inline void FusedAic(GM_ADDR q, GM_ADDR kv, GM_ADDR s2, GM_ADDR p2, G
     mm2.End();
 }
 
-// AIV 侧：与 sa_epilogue 同一算法，改为固定切片 + 批循环 + 组内 flag
+// AIV 侧：重数-softmax。按固定切片 + 批循环 + 组内 flag 组织。
 __aicore__ inline void FusedAiv(GM_ADDR s2, GM_ADDR idx_gm, GM_ADDR sinkrep_gm, GM_ADDR p2,
                                 int32_t mTok, float scale, int32_t B, int64_t M)
 {
-    constexpr int32_t FTB = 4;                 // 与 sa_epilogue TBTOK 一致
+    constexpr int32_t FTB = 4;                 // 每次处理的 token 数
     constexpr int32_t CHTOK = 64;              // 重数直方图的分块长度，见下面的 barrier 说明
     constexpr int32_t FROWS = FTB * 64;        // 256
     constexpr int32_t FCOLS = 32;
