@@ -612,7 +612,7 @@ extern "C" __global__ __aicore__ void ix_rope(
     qG.SetL2CacheHint<CacheRwMode::READ>(CacheMode::CACHE_MODE_DISABLE);
     GlobalTensor<float>    cG; cG.SetGlobalBuffer(reinterpret_cast<__gm__ float*>(cos_gm), (int64_t)seqLen * RD);
     GlobalTensor<float>    sG; sG.SetGlobalBuffer(reinterpret_cast<__gm__ float*>(sin_gm), (int64_t)seqLen * RD);
-    GlobalTensor<uint32_t> wG; wG.SetGlobalBuffer(reinterpret_cast<__gm__ uint32_t*>(swap_gm), RT_TOK * NH * RD);   // v2: 全表
+    GlobalTensor<uint32_t> wG; wG.SetGlobalBuffer(reinterpret_cast<__gm__ uint32_t*>(swap_gm), RT_TOK * NH * RD);   // 整张表
     GlobalTensor<float>    gG; gG.SetGlobalBuffer(reinterpret_cast<__gm__ float*>(sgn_gm), RD);
 
     constexpr int32_t QB  = RT_TOK * NH * HD;   // 8192 bf16 元素 = 16KB
@@ -648,7 +648,7 @@ extern "C" __global__ __aicore__ void ix_rope(
         LocalTensor<bfloat16_t> inT = inQ.AllocTensor<bfloat16_t>();
         LocalTensor<float> ct = inT[QB].ReinterpretCast<float>();
         DataCopy(inT, qG[(int64_t)tok0 * NH * HD], tb * NH * HD);
-        if (pos0 + tb <= seqLen) {                        // v2: 整块快速拷贝（不跨 batch 边界时）
+        if (pos0 + tb <= seqLen) {                        // 不跨 batch 边界时可以整块快速拷贝
             DataCopy(ct, cG[(int64_t)pos0 * RD], tb * RD);
             DataCopy(ct[CSB], sG[(int64_t)pos0 * RD], tb * RD);
         } else {
@@ -1053,7 +1053,7 @@ class ModelNew(torch.nn.Module):
         self._tilings = {}
         self._ws = None
         self._Sw = None
-        self._Swb = None                                    # v9: 融合路径 bf16 直出 S 双缓冲
+        self._Swb = None                                    # 融合路径 bf16 直出 S 双缓冲
         self._cs_cache = {}     # (start_pos, seqlen, dev) -> (cosI, sinI)
         self._tab_cache = {}    # dev -> (swap, sgn)
         self._args_cache = {}
@@ -1078,7 +1078,7 @@ class ModelNew(torch.nn.Module):
         end_pos = start_pos + seqlen
         T = end_pos // ratio
         K = min(self.index_topk, T)
-        # v2: 静默错误 -> 显式断言
+        # 静默错误 -> 显式断言
         assert T <= _TPAD, f"kernel 排序树特化 T<= {_TPAD}"
         assert K <= 128 and K % 64 == 0, "kernel 向量计数约束：K<=128 且 64|K"
         assert self.kv_cache.shape[0] >= bsz and self.kv_cache.shape[1] >= T, "kv_cache 覆盖不足"
@@ -1332,40 +1332,39 @@ class ModelNew(torch.nn.Module):
         # myTok<=256，所以这两个形状条件是硬前提，不做第二套实现。
         assert seqlen % 40 == 0 and seqlen <= 10240, \
             "kernel 特化 seqlen %% 40 == 0 且 <= 10240，当前 seqlen=%d" % seqlen
-        if True:
-            # v8 融合单 kernel：16 次发射 -> 1 次，topk 组内隐藏，S 组内切片 L2 驻留
-            # v9: S 改 bf16 直出（C 流量减半），专用 bf16-C tiling
-            # v11: S 前缀读 + inQ 双缓冲 + w 整批读 + 输出队列化（wrow 8KB ⇒ seqlen<=10240）
-            _stot = self._args_cache[("stot", bkey)]          # 紧凑缓冲元素数/相位
-            if self._Swb is None or self._Swb.numel() != 2 * _stot or self._Swb.device != dev:
-                self._Swb = torch.empty(2 * _stot, dtype=torch.bfloat16, device=dev)
-            fk = ("t2fused", seqlen, T, K, offset, causal, bsz, float(wscale), dev)
-            if fk not in self._args_cache:
-                # args[8] = scale 的 fp32 位模式（int32 数组里携带一个浮点）
-                sb = int(torch.tensor([wscale], dtype=torch.float32).view(torch.int32).item())
-                fa = torch.tensor([seqlen, T, ratio, K, offset, causal, 0, bsz, sb],
-                                  dtype=torch.int32)
-                self._args_cache[fk] = fa.to(dev)
-            # 输出对（int32 kernel 写 + int64 拷贝目标）跨迭代复用：省每迭代
-            # torch.empty 21MB 分配 + .to() 新分配；copy_ 的 device cast 与 .to() 同 kernel。
-            o64 = self._args_cache.get(("o64", bsz, seqlen, K, dev))
-            if o64 is None:
-                o64 = torch.empty(bsz, seqlen, K, dtype=torch.int64, device=dev)
-                self._args_cache[("o64", bsz, seqlen, K, dev)] = o64
-            if self._c2ov:
-                self._ext.c2_join()            # 等副流的 weights_proj 落地
-            self._ext.run_fused_t2(q, kvp, self._Swb, wl, o64, self._args_cache[fk],
-                                   self._tilings[("bf", M, dev)], self._ws, aic, bndc)
-            # 只在**本次前向确实走了 c2 快路径**时才绑定 —— 否则 q/wl 还是
-            # F.linear 的临时张量（self._c2 可能是在这次前向的 else 分支里刚建立的），
-            # 把临时指针绑进 static 会让此后每次 go_t2 读到已回收的内存。
-            # 首版漏了这个条件，e128 门的 gate3（8 次计时形态 vs eager 逐位）当场判 RED。
-            if self._fastt2 is None and c2hit:
-                self._ext.prepare_t2(q, cosI, sinI, swap, sgn, self._args_cache[rk],
-                                     kvp, self._Swb, wl, o64, self._args_cache[fk],
-                                     self._tilings[("bf", M, dev)], self._ws, bndc, aic, aiv)
-                self._fastt2 = (x.data_ptr(), qr.data_ptr(), self._ext.go_t2, o64)
-            return o64                                   # kernel 内直写 int64，免 aclnn Cast
+        # 融合单 kernel：16 次发射 -> 1 次，topk 组内隐藏，S 组内切片 L2 驻留
+        # S 改 bf16 直出（C 流量减半），专用 bf16-C tiling
+        # S 前缀读 + inQ 双缓冲 + w 整批读 + 输出队列化（wrow 8KB ⇒ seqlen<=10240）
+        _stot = self._args_cache[("stot", bkey)]          # 紧凑缓冲元素数/相位
+        if self._Swb is None or self._Swb.numel() != 2 * _stot or self._Swb.device != dev:
+            self._Swb = torch.empty(2 * _stot, dtype=torch.bfloat16, device=dev)
+        fk = ("t2fused", seqlen, T, K, offset, causal, bsz, float(wscale), dev)
+        if fk not in self._args_cache:
+            # args[8] = scale 的 fp32 位模式（int32 数组里携带一个浮点）
+            sb = int(torch.tensor([wscale], dtype=torch.float32).view(torch.int32).item())
+            fa = torch.tensor([seqlen, T, ratio, K, offset, causal, 0, bsz, sb],
+                              dtype=torch.int32)
+            self._args_cache[fk] = fa.to(dev)
+        # 输出对（int32 kernel 写 + int64 拷贝目标）跨迭代复用：省每迭代
+        # torch.empty 21MB 分配 + .to() 新分配；copy_ 的 device cast 与 .to() 同 kernel。
+        o64 = self._args_cache.get(("o64", bsz, seqlen, K, dev))
+        if o64 is None:
+            o64 = torch.empty(bsz, seqlen, K, dtype=torch.int64, device=dev)
+            self._args_cache[("o64", bsz, seqlen, K, dev)] = o64
+        if self._c2ov:
+            self._ext.c2_join()            # 等副流的 weights_proj 落地
+        self._ext.run_fused_t2(q, kvp, self._Swb, wl, o64, self._args_cache[fk],
+                               self._tilings[("bf", M, dev)], self._ws, aic, bndc)
+        # 只在**本次前向确实走了 c2 快路径**时才绑定 —— 否则 q/wl 还是
+        # F.linear 的临时张量（self._c2 可能是在这次前向的 else 分支里刚建立的），
+        # 把临时指针绑进 static 会让此后每次 go_t2 读到已回收的内存。
+        # 首版漏了这个条件，e128 门的 gate3（8 次计时形态 vs eager 逐位）当场判 RED。
+        if self._fastt2 is None and c2hit:
+            self._ext.prepare_t2(q, cosI, sinI, swap, sgn, self._args_cache[rk],
+                                 kvp, self._Swb, wl, o64, self._args_cache[fk],
+                                 self._tilings[("bf", M, dev)], self._ws, bndc, aic, aiv)
+            self._fastt2 = (x.data_ptr(), qr.data_ptr(), self._ext.go_t2, o64)
+        return o64                                   # kernel 内直写 int64，免 aclnn Cast
 
 def _make_args():
     # 评测器的 AST 过滤会丢弃模块级 `args = ModelArgs(...)`（非字面量赋值），
