@@ -1,0 +1,18 @@
+# 昇腾 910B4 / CANN 9.1.0 环境。
+#
+# torch 与 torch_npu 必须按昇腾官方配套表选择版本，不要直接 pip install 本文件里的
+# 版本号 —— torch_npu 需要与 CANN 版本和 torch 版本严格配套。本文件只声明本项目
+# 实际验证过的组合与那些可以自由安装的纯 python 依赖。
+#
+# 已验证组合：
+#   CANN 9.1.0 + Python 3.12 + torch 2.x + 对应 torch_npu
+#
+# torch                      # 按昇腾配套表安装
+# torch_npu                  # 按昇腾配套表安装，需含 torch_npu.contrib.transfer_to_npu
+
+pybind11>=2.10
+
+# 以下为构建期依赖，通常随 CANN 一起提供，无需 pip 安装：
+#   bisheng      (CANN 自带，$ASCEND_HOME_PATH/.../ccec_compiler/bin/bisheng)
+#   tiling_api   (CANN 自带静态库)
+#   g++          (系统包管理器，需支持 -std=c++17)
