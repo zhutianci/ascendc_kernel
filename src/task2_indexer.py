@@ -33,8 +33,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from dataclasses import dataclass
-from typing import Tuple, Optional, Literal
-from contextlib import contextmanager
+from typing import Tuple, Literal
 
 world_size = 1
 def _load_asc(fname, fallback):
@@ -54,7 +53,6 @@ rank = 0
 block_size = 128
 fp4_block_size = 32
 
-@contextmanager
 @dataclass
 class ModelArgs:
     max_batch_size: int = 4

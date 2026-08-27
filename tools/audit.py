@@ -78,6 +78,32 @@ def audit(py, embeds):
             print("  FAIL %s differs from %s" % (var, asc))
             ok = False
 
+    # Every decorator on a module-level def/class must resolve to something this module
+    # actually has.  A surgical refactor that deletes a decorated function can leave its
+    # decorator behind, where it silently re-binds to the next definition.
+    defined = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    defined |= {t.id for n in tree.body if isinstance(n, ast.Assign)
+                for t in n.targets if isinstance(t, ast.Name)}
+    imported = {a.asname or a.name.split(".")[0] for n in tree.body
+                if isinstance(n, (ast.Import, ast.ImportFrom)) for a in n.names}
+    for n in tree.body:
+        for d in getattr(n, "decorator_list", []):
+            root = d
+            while isinstance(root, (ast.Call, ast.Attribute)):
+                root = root.func if isinstance(root, ast.Call) else root.value
+            name = getattr(root, "id", None)
+            if name and name not in defined | imported:
+                print("  FAIL decorator @%s on %s resolves to nothing" % (name, n.name))
+                ok = False
+    print("  ok   all module-level decorators resolve")
+
+    # Unused imports are usually harmless, but after a deletion pass they are a strong hint
+    # that something was cut only halfway.
+    body_src = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith(("import ", "from ")))
+    stale = sorted(i for i in imported if not re.search(r"\b%s\b" % re.escape(i), body_src))
+    if stale:
+        print("  WARN imports never referenced: %s" % stale)
+
     tags = re.findall(r"\[E\d+|\[v\d+", text)
     if tags:
         print("  FAIL %d leftover experiment tags: %s" % (len(tags), sorted(set(tags))[:8]))

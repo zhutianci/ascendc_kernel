@@ -161,11 +161,15 @@ bash run_benchmark.sh 3
 
 ### 实测（昇腾 910B4，CANN 9.1.0）
 
-| 算子 | v0 参考 | v1 本作品 | **加速比** |
+| 算子 | v0 参考 (ms) | v1 本作品 (ms) | **加速比** |
 |---|---|---|---|
-| Task1 SparseAttention | ≈ 12.86 ms | **1.042 ms** | **12.32 – 12.38 ×** |
-| Task2 Lightning Indexer | ≈ 9.30 ms | **1.243 ms** | **7.45 – 7.50 ×** |
-| Task3 Sinkhorn | ≈ 1.66 ms | **0.107 ms** | **15.2 – 16.0 ×** |
+| Task1 SparseAttention | 12.81 – 12.83 | **1.039 – 1.052** | **12.18 – 12.35 ×** |
+| Task2 Lightning Indexer | 9.31 – 9.33 | **1.232 – 1.246** | **7.49 – 7.57 ×** |
+| Task3 Sinkhorn | 1.59 – 1.68 | **0.102 – 0.105** | **15.6 – 16.1 ×** |
+
+四道逐位门在本提交版上全绿（`E92_SENTINEL` / `E128_GATE` / `E120_GATE` / `E121_GATE`），
+`sim_verify` 12/12，`harness_dryrun` PASS。逐轮数据与等价性验证见
+[`results/performance.md`](results/performance.md)。
 
 > Task3 的 v0 只有 1.66ms 且其中很大一部分是评测框架自身的双重 `sync_devices` 与
 > `set_seed` 设备残留，所以它的加速比在不同轮次间抖动较大（14.6 – 18.0× 都出现过）。
