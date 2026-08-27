@@ -1,6 +1,6 @@
 # 2026 KernelSwift 算子创新大赛 — 昇腾 910B4 三算子优化
 
-> 参赛选手/团队：`<待填>` · 所选赛题：三算子（SparseAttention / Lightning Indexer / Sinkhorn）· UID：`<待填>`
+> 参赛选手/团队：`<待填：参赛选手名称/团队名称>` · 所选赛题：三算子（SparseAttention / Lightning Indexer / Sinkhorn） · UID：**23400067**
 
 ---
 
@@ -272,4 +272,4 @@ python3 tools/run_eval.py auto_bench.py \
   除上文说明的两处 AST 兼容性修补外未做改动，其数值语义完全未变。
 * 本作品未使用任何未公开的内部资料。
 
-参赛者签名：`<待填>`　　日期：`<待填>`
+参赛者签名：`<待填>`　　日期：`<待填>`　　UID：23400067
