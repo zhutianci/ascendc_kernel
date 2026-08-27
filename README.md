@@ -1,6 +1,6 @@
 # 2026 KernelSwift 算子创新大赛 — 昇腾 910B4 三算子优化
 
-> · 所选赛题：Clike算子优化赛道-华为赛题三算子（SparseAttention / Lightning Indexer / Sinkhorn） · UID：**23400067**
+> 参赛选手：**朱天赐** · 所选赛道：**【赛道二】【华为】Clike优化赛道**（SparseAttention / Lightning Indexer / Sinkhorn 三算子） · UID：**23400067**
 
 ---
 
@@ -266,4 +266,4 @@ python3 tools/run_eval.py auto_bench.py \
   除上文说明的两处 AST 兼容性修补外未做改动，其数值语义完全未变。
 * 本作品未使用任何未公开的内部资料。
 
-参赛者签名：UID：23400067　日期：2026年8月27日　
+参赛者签名：**朱天赐**　　UID：23400067　　日期：2026 年 8 月 27 日　
