@@ -1,6 +1,6 @@
 # 2026 KernelSwift 算子创新大赛 — 昇腾 910B4 三算子优化
 
-> 参赛选手/团队：`<待填：参赛选手名称/团队名称>` · 所选赛题：三算子（SparseAttention / Lightning Indexer / Sinkhorn） · UID：**23400067**
+> · 所选赛题：Clike算子优化赛道-华为赛题三算子（SparseAttention / Lightning Indexer / Sinkhorn） · UID：**23400067**
 
 ---
 
@@ -198,12 +198,6 @@ mm1↔mm2 交替 41µs（要拿它必须放开相位数，一放开就撞 L2 墙
 其余是评测框架的 `sync_devices`（40µs）与 `set_seed` 设备残留（36µs），
 且都发生在 `forward` 返回**之后**。
 
-### 一条方法论
-
-`op_summary` 里的 `aicore_time` / `aiv_time` 是**核间均值且含 flag 等待**，
-不能当墙用。我们所有"谁是瓶颈"的判断都来自消融实验（把某一段改成空操作再量墙差），
-而不是来自计数器均值。这个区别在 Task2 上一度让人误判成"AIC/AIV 双满载"，
-实际消融是 AIV-only 919µs vs AIC-only 655µs。
 
 ---
 
@@ -272,4 +266,4 @@ python3 tools/run_eval.py auto_bench.py \
   除上文说明的两处 AST 兼容性修补外未做改动，其数值语义完全未变。
 * 本作品未使用任何未公开的内部资料。
 
-参赛者签名：`<待填>`　　日期：`<待填>`　　UID：23400067
+参赛者签名：UID：23400067　日期：2026年8月27日　
